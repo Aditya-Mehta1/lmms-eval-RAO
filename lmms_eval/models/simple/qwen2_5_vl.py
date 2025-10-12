@@ -42,6 +42,7 @@ class Qwen2_5_VL(lmms):
         pretrained: str = "Qwen/Qwen2.5-VL-3B-Instruct",
         device: Optional[str] = "cuda",
         device_map: Optional[str] = "auto",
+        dtype="bfloat16",
         batch_size: Optional[Union[int, str]] = 1,
         use_cache=True,
         attn_implementation: Optional[str] = None,
@@ -84,7 +85,7 @@ class Qwen2_5_VL(lmms):
 
         # Prepare model loading arguments
         model_kwargs = {
-            "torch_dtype": "bfloat16",
+            "torch_dtype": dtype,
             "device_map": self.device_map,
         }
 
