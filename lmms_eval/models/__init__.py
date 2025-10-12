@@ -64,7 +64,7 @@ AVAILABLE_SIMPLE_MODELS = {
     "ross": "Ross",
     "slime": "Slime",
     "srt_api": "SRT_API",
-    "smolVLM": "smolVLM",
+    "smolVLM": "SmolVLM",
     "tinyllava": "TinyLlava",
     "videoChatGPT": "VideoChatGPT",
     "videochat2": "VideoChat2",
