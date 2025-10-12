@@ -57,7 +57,7 @@ class SmolVLM(lmms):
         max_new_tokens: int = 256,
         dtype: Optional[Union[str, torch.dtype]] = None,
         batch_size: int = 1,
-        system_prompt: Optional[str] = "You are a helpful assistant.",
+        system_prompt: Optional[str] = None,
         **kwargs: Any,
     ) -> None:
         super().__init__()
