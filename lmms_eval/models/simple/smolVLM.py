@@ -83,7 +83,8 @@ class SmolVLM(lmms):
         processor_kwargs["trust_remote_code"] = True
         self.processor = AutoProcessor.from_pretrained(pretrained, **processor_kwargs)
 
-        attn_impl = "flash_attention_2" if self._device.type == "cuda" else None
+        # attn_impl = "flash_attention_2" if self._device.type == "cuda" else None
+        attn_impl = None
         model_kwargs: Dict[str, Any] = {
             "torch_dtype": dtype_override,
             "trust_remote_code": True,
