@@ -1,3 +1,0 @@
-group: llava_interleave_bench_blink
-task:
-  - llava_interleave_bench_blink
