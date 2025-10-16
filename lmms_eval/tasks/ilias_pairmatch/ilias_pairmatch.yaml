@@ -10,7 +10,7 @@ doc_to_text: !function utils.ilias_pairmatch_doc_to_text
 doc_to_target: !function utils.ilias_pairmatch_doc_to_target
 process_results: !function utils.ilias_pairmatch_process_results
 generation_kwargs:
-  max_new_tokens: 4
+  max_new_tokens: 128
   temperature: 0
   do_sample: false
 metric_list:
@@ -20,7 +20,7 @@ metric_list:
 lmms_eval_specific_kwargs:
   default:
     pre_prompt: ""
-    post_prompt: "\nExplain your reasoning and then conclude with a yes or no answer in <answer> tags as <answer>yes</answer> or <answer>no</answer>."
+    post_prompt: "\nRespond with a short answer with a yes or no answer in <answer> tags as <answer>yes</answer> or <answer>no</answer>."
 metadata:
   - version: 0.0
   - source: "vrg-prague/ilias core_db"
