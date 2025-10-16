@@ -1,0 +1,28 @@
+dataset_path: json
+dataset_kwargs:
+  data_files:
+    test: lmms_eval/tasks/ilias_pairmatch/data/ilias_pairmatch.jsonl
+task: "ilias_pairmatch"
+test_split: test
+output_type: generate_until
+doc_to_visual: !function utils.ilias_pairmatch_doc_to_visual
+doc_to_text: !function utils.ilias_pairmatch_doc_to_text
+doc_to_target: !function utils.ilias_pairmatch_doc_to_target
+process_results: !function utils.ilias_pairmatch_process_results
+generation_kwargs:
+  max_new_tokens: 4
+  temperature: 0
+  do_sample: false
+metric_list:
+  - metric: accuracy
+    aggregation: !function utils.ilias_pairmatch_aggregate_accuracy
+    higher_is_better: true
+lmms_eval_specific_kwargs:
+  default:
+    pre_prompt: ""
+    post_prompt: "\nExplain your reasoning and then conclude with a yes or no answer in <answer> tags as <answer>yes</answer> or <answer>no</answer>."
+metadata:
+  - version: 0.0
+  - source: "vrg-prague/ilias core_db"
+  - positives: 2000
+  - negatives: 2000
