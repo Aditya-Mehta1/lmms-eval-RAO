@@ -1,6 +1,6 @@
 import re
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 from PIL import Image
 
@@ -82,3 +82,16 @@ def ilias_pairmatch_process_results(doc: Dict, results) -> Dict:
 
 def ilias_pairmatch_aggregate_accuracy(results: List[float]) -> float:
     return float(sum(results) / len(results)) if results else 0.0
+
+
+def ilias_pairmatch_process_results_with_split(doc: Dict, results) -> Dict:
+    base = ilias_pairmatch_process_results(doc, results)
+    if doc.get("answer") == "yes":
+        base["accuracy_yes"] = base["accuracy"]
+    elif doc.get("answer") == "no":
+        base["accuracy_no"] = base["accuracy"]
+    return base
+
+
+def ilias_pairmatch_aggregate_label_accuracy(results: List[float]) -> float:
+    return ilias_pairmatch_aggregate_accuracy(results)
