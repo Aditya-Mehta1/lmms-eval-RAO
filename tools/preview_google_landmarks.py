@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Quick preview utility for the ilias_pairmatch dataset without GUI requirements."""
+"""Preview utility for the google_landmarks task."""
 
 import argparse
 import json
@@ -29,9 +29,9 @@ def _load_font(size: int = 18) -> ImageFont.ImageFont:
 def create_preview_image(record: dict, data_dir: Path, save_dir: Path) -> Path:
     question = record["question"]
     answer = record["answer"]
-    pair_id = record["pair_id"]
-    inst_ids = record.get("instance_ids", [])
-    same_flag = record.get("same_instance")
+    sample_id = record.get("sample_id", record.get("pair_id"))
+    question_type = record.get("question_type")
+    landmark = record.get("landmark")
 
     images = []
     for rel_path in record["image_paths"]:
@@ -39,7 +39,7 @@ def create_preview_image(record: dict, data_dir: Path, save_dir: Path) -> Path:
         images.append(Image.open(img_path).convert("RGB"))
 
     margin = 20
-    text_height = 120
+    text_height = 140
     panel_width = sum(img.width for img in images) + margin * (len(images) + 1)
     panel_height = max(img.height for img in images) + text_height + margin * 2
     canvas = Image.new("RGB", (panel_width, panel_height), color=(245, 245, 245))
@@ -52,13 +52,14 @@ def create_preview_image(record: dict, data_dir: Path, save_dir: Path) -> Path:
     for idx, img in enumerate(images):
         canvas.paste(img, (x_offset, margin))
         draw.rectangle([x_offset, margin, x_offset + img.width - 1, margin + img.height - 1], outline=(0, 0, 0), width=2)
-        label = chr(ord("A") + idx)
+        label = "Ref" if (question_type == "multiple_choice" and idx == 0) else chr(ord("A") + idx)
         draw.text((x_offset + 10, margin + 10), label, fill=(255, 0, 0), font=font_label)
         x_offset += img.width + margin
 
     text_y = max(img.height for img in images) + margin + 10
     meta_lines = [
-        f"pair_id={pair_id} | answer={answer} | same_instance={same_flag} | instance_ids={inst_ids}",
+        f"sample_id={sample_id} | type={question_type} | answer={answer}",
+        f"landmark={landmark}",
         f"question: {question}",
     ]
     for line in meta_lines:
@@ -66,7 +67,7 @@ def create_preview_image(record: dict, data_dir: Path, save_dir: Path) -> Path:
         text_y += font_meta.getbbox(line)[3] - font_meta.getbbox(line)[1] + 4
 
     save_dir.mkdir(parents=True, exist_ok=True)
-    out_path = save_dir / f"{pair_id}.jpg"
+    out_path = save_dir / f"{sample_id}.jpg"
     canvas.save(out_path, quality=95)
     return out_path
 
@@ -80,20 +81,20 @@ def sample_records(records: List[dict], k: int, seed: int, shuffle: bool) -> Lis
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Preview items from ilias_pairmatch.")
+    parser = argparse.ArgumentParser(description="Preview items from google_landmarks.")
     parser.add_argument(
         "--dataset-json",
         type=Path,
-        default=Path("lmms_eval/tasks/ilias_pairmatch/data/ilias_pairmatch.jsonl"),
-        help="Path to ilias_pairmatch.jsonl.",
+        default=Path("lmms_eval/tasks/google_landmarks/data/google_landmarks.jsonl"),
+        help="Path to google_landmarks.jsonl.",
     )
-    parser.add_argument("--num-samples", type=int, default=5, help="How many pairs to preview.")
+    parser.add_argument("--num-samples", type=int, default=5, help="How many samples to preview.")
     parser.add_argument("--seed", type=int, default=0, help="RNG seed used with --shuffle.")
     parser.add_argument("--shuffle", action="store_true", help="Shuffle before selecting samples.")
     parser.add_argument(
         "--save-dir",
         type=Path,
-        default=Path("preview_outputs"),
+        default=Path("preview_google_landmarks"),
         help="Directory where preview composites will be written.",
     )
     args = parser.parse_args()
@@ -107,8 +108,10 @@ def main() -> None:
     subset = sample_records(records, args.num_samples, args.seed, args.shuffle)
 
     for idx, record in enumerate(subset, 1):
-        qtype = record.get("question_type", "unknown")
-        print(f"[{idx}/{len(subset)}] id={record.get('pair_id', record.get('sample_id'))} type={qtype} answer={record['answer']} instance_ids={record.get('instance_ids')}")
+        print(
+            f"[{idx}/{len(subset)}] sample_id={record.get('sample_id')} "
+            f"type={record.get('question_type')} answer={record['answer']} landmark={record.get('landmark')}"
+        )
         out_path = create_preview_image(record, data_dir, args.save_dir)
         print(f"    saved preview -> {out_path}")
 

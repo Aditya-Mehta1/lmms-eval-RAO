@@ -18,7 +18,7 @@ def _resolve_image_path(rel_path: str) -> Path:
     return Path(rel_path).expanduser().resolve()
 
 
-def ilias_pairmatch_doc_to_visual(doc: Dict) -> List[Image.Image]:
+def inquire_doc_to_visual(doc: Dict) -> List[Image.Image]:
     visuals: List[Image.Image] = []
     for rel_path in doc["image_paths"]:
         path = _resolve_image_path(rel_path)
@@ -26,16 +26,16 @@ def ilias_pairmatch_doc_to_visual(doc: Dict) -> List[Image.Image]:
     return visuals
 
 
-def ilias_pairmatch_doc_to_text(doc: Dict, lmms_eval_specific_kwargs: Dict = None) -> str:
+def inquire_doc_to_text(doc: Dict, lmms_eval_specific_kwargs: Dict = None) -> str:
     if lmms_eval_specific_kwargs is None:
         lmms_eval_specific_kwargs = {}
     pre_prompt = lmms_eval_specific_kwargs.get("pre_prompt", "")
     post_prompt = lmms_eval_specific_kwargs.get("post_prompt", "")
-    question = doc.get("question", "Do these images depict the same instance?")
+    question = doc.get("question", "Do these images show an animal of the same scientific species?")
     return f"{pre_prompt}{question}{post_prompt}"
 
 
-def ilias_pairmatch_doc_to_target(doc: Dict) -> str:
+def inquire_doc_to_target(doc: Dict) -> str:
     return doc["answer"]
 
 
@@ -75,7 +75,7 @@ def _mean(values: List[float]) -> float:
     return float(sum(values) / len(values)) if values else 0.0
 
 
-def ilias_pairmatch_process_results(doc: Dict, results) -> Dict:
+def inquire_process_results(doc: Dict, results) -> Dict:
     prediction = results[0] if results else ""
     question_type = doc.get("question_type", "pairwise")
 
@@ -91,7 +91,7 @@ def ilias_pairmatch_process_results(doc: Dict, results) -> Dict:
             "model_answer": normalized or prediction.strip().lower(),
             "target": doc["answer"],
             "question_type": question_type,
-            "same_instance": doc.get("same_instance"),
+            "species": doc.get("species"),
             "instance_ids": doc.get("instance_ids"),
             "source_keys": doc.get("source_keys"),
         }
@@ -108,18 +108,19 @@ def ilias_pairmatch_process_results(doc: Dict, results) -> Dict:
         "target": doc["answer"],
         "question_type": question_type,
         "target_count": doc.get("target_count"),
+        "species": doc.get("species"),
         "instance_ids": doc.get("instance_ids"),
         "source_keys": doc.get("source_keys"),
     }
 
 
-def ilias_pairmatch_pairwise_aggregate(results: List[float]) -> float:
+def inquire_pairwise_aggregate(results: List[float]) -> float:
     return _mean(results)
 
 
-def ilias_pairmatch_multiple_choice_aggregate(results: List[float]) -> float:
+def inquire_multiple_choice_aggregate(results: List[float]) -> float:
     return _mean(results)
 
 
-def ilias_pairmatch_overall_aggregate(results: List[float]) -> float:
+def inquire_overall_aggregate(results: List[float]) -> float:
     return _mean(results)

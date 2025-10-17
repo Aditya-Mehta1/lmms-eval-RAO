@@ -1,8 +1,7 @@
 #!/usr/bin/env python
-"""Generate the ilias_pairmatch mixed dataset from vrg-prague/ilias core_db."""
+"""Generate the google_landmarks dataset (pairwise + multi-choice) from zguo0525/google-landmarks-v2-mini."""
 
 import argparse
-import itertools
 import json
 import random
 import shutil
@@ -13,20 +12,11 @@ from typing import Dict, Iterable, List, Sequence, Tuple
 from datasets import load_dataset
 from tqdm import tqdm
 
-PAIR_QUESTION = (
-    "Do these images contain the same or identical products? For two products to be considered identical, "
-    "minor changes such as those that can be explained by context, backgrounds or photography conditions are "
-    "allowed, but characteristic features of the product (color, shape, size, etc.) should remain consistent. "
-    "Explain your reasoning and then conclude with a yes or no answer in <answer> tags as "
-    "<answer>yes</answer> or <answer>no</answer>."
-)
+PAIR_QUESTION = "Do these two images contain the same landmark?"
 
 MULTI_QUESTION = (
-    "The first image is a reference image. How many of the other images contain the same or identical products to one "
-    "in the reference image? For two products to be considered identical, minor changes such as those that can be "
-    "explained by context, backgrounds or photography conditions are allowed, but characteristic features of the "
-    "product (color, shape, size, etc.) should remain consistent. Answer briefly with a number from 0 to 3 in "
-    "<answer> tags as <answer>n</answer>."
+    "The first image is a reference image. How many of the other images contain the same landmark as the reference "
+    "image? Answer briefly with a number from 0 to 3 in <answer> tags as <answer>n</answer>."
 )
 
 YES_LABEL = "yes"
@@ -35,28 +25,27 @@ PAIR_SAMPLES_PER_LABEL = 500
 MULTI_SAMPLES_PER_CLASS = 250
 
 
-def parse_instance_id(key: str) -> str:
-    if "P" not in key:
-        raise ValueError(f"Unexpected __key__ pattern: {key}")
-    after_p = key.split("P", 1)[1]
-    digits = "".join(ch for ch in after_p if ch.isdigit())
-    if len(digits) < 4:
-        raise ValueError(f"Unexpected __key__ pattern: {key}")
-    return digits[:4]
-
-
-def index_by_instance(entries: Iterable[Dict]) -> Dict[str, List[Dict]]:
+def index_by_landmark(entries: Iterable[Dict], label_names: List[str]) -> Dict[str, List[Dict]]:
     grouped: Dict[str, List[Dict]] = defaultdict(list)
-    for sample in tqdm(entries, desc="Indexing instances", unit="sample"):
-        instance_id = parse_instance_id(sample["__key__"])
-        grouped[instance_id].append(
+    for idx, sample in enumerate(tqdm(entries, desc="Indexing landmarks", unit="sample")):
+        label_idx = sample["label"]
+        label_name = label_names[label_idx] if label_idx < len(label_names) else str(label_idx)
+        grouped[label_name].append(
             {
-                "__key__": sample["__key__"],
-                "instance_id": instance_id,
-                "image": sample["jpg"].convert("RGB"),
+                "landmark": label_name,
+                "image_id": idx,
+                "image": sample["image"].convert("RGB"),
             }
         )
     return grouped
+
+
+def make_image_entry(entry: Dict) -> Dict:
+    return {
+        "image": entry["image"],
+        "landmark": entry["landmark"],
+        "image_id": entry["image_id"],
+    }
 
 
 def sample_same_pairs(grouped: Dict[str, List[Dict]], limit: int, rng: random.Random) -> List[Tuple[Dict, Dict]]:
@@ -64,54 +53,45 @@ def sample_same_pairs(grouped: Dict[str, List[Dict]], limit: int, rng: random.Ra
     for entries in grouped.values():
         if len(entries) < 2:
             continue
-        combos = itertools.combinations(range(len(entries)), 2)
-        pool.extend((entries[i], entries[j]) for i, j in combos)
+        idxs = list(range(len(entries)))
+        rng.shuffle(idxs)
+        for i in range(len(idxs)):
+            for j in range(i + 1, len(idxs)):
+                pool.append((entries[idxs[i]], entries[idxs[j]]))
     if len(pool) < limit:
-        raise RuntimeError(f"Only {len(pool)} same-instance combos available; need {limit}.")
+        raise RuntimeError(f"Need {limit} same-landmark pairs, only found {len(pool)}.")
     rng.shuffle(pool)
     seen = set()
-    picked: List[Tuple[Dict, Dict]] = []
-    with tqdm(total=limit, desc="Sampling same-instance pairs", unit="pair") as progress:
-        for left, right in pool:
-            key = tuple(sorted((left["__key__"], right["__key__"])))
-            if key in seen:
-                continue
-            seen.add(key)
-            picked.append((left, right))
-            progress.update(1)
-            if len(picked) == limit:
-                break
-    if len(picked) < limit:
-        raise RuntimeError(f"Could not collect {limit} unique same-instance pairs (got {len(picked)}).")
-    return picked
+    selected: List[Tuple[Dict, Dict]] = []
+    for left, right in pool:
+        key = tuple(sorted((left["image_id"], right["image_id"])))
+        if key in seen:
+            continue
+        seen.add(key)
+        selected.append((left, right))
+        if len(selected) == limit:
+            break
+    if len(selected) < limit:
+        raise RuntimeError(f"Could not sample enough same-landmark pairs ({len(selected)}).")
+    return selected
 
 
 def sample_diff_pairs(grouped: Dict[str, List[Dict]], limit: int, rng: random.Random) -> List[Tuple[Dict, Dict]]:
-    inst_ids = [inst for inst, entries in grouped.items() if entries]
-    if len(inst_ids) < 2:
-        raise RuntimeError("Need at least two distinct instance IDs to form negative pairs.")
+    landmarks = [lm for lm, entries in grouped.items() if entries]
+    if len(landmarks) < 2:
+        raise RuntimeError("Need at least two landmarks for different-species pairs.")
     seen = set()
-    picked: List[Tuple[Dict, Dict]] = []
-    with tqdm(total=limit, desc="Sampling different-instance pairs", unit="pair") as progress:
-        while len(picked) < limit:
-            id_a, id_b = rng.sample(inst_ids, 2)
-            left = rng.choice(grouped[id_a])
-            right = rng.choice(grouped[id_b])
-            key = tuple(sorted((left["__key__"], right["__key__"])))
-            if key in seen:
-                continue
-            seen.add(key)
-            picked.append((left, right))
-            progress.update(1)
-    return picked
-
-
-def make_image_entry(entry: Dict) -> Dict:
-    return {
-        "image": entry["image"],
-        "instance_id": entry["instance_id"],
-        "source_key": entry["__key__"],
-    }
+    selected: List[Tuple[Dict, Dict]] = []
+    while len(selected) < limit:
+        lm_a, lm_b = rng.sample(landmarks, 2)
+        left = rng.choice(grouped[lm_a])
+        right = rng.choice(grouped[lm_b])
+        key = tuple(sorted((left["image_id"], right["image_id"])))
+        if key in seen:
+            continue
+        seen.add(key)
+        selected.append((left, right))
+    return selected
 
 
 def build_pair_records(
@@ -119,9 +99,9 @@ def build_pair_records(
     negatives: Sequence[Tuple[Dict, Dict]],
 ) -> Tuple[List[Dict], Dict[str, int]]:
     records: List[Dict] = []
-    label_counts = {YES_LABEL: 0, NO_LABEL: 0}
-
+    counts = {YES_LABEL: 0, NO_LABEL: 0}
     counter = 0
+
     for left, right in positives:
         record_id = f"pair_{counter:04d}"
         records.append(
@@ -130,11 +110,11 @@ def build_pair_records(
                 "question_type": "pairwise",
                 "question": PAIR_QUESTION,
                 "answer": YES_LABEL,
-                "same_instance": True,
+                "landmark": [left["landmark"], right["landmark"]],
                 "images": [make_image_entry(left), make_image_entry(right)],
             }
         )
-        label_counts[YES_LABEL] += 1
+        counts[YES_LABEL] += 1
         counter += 1
 
     for left, right in negatives:
@@ -145,14 +125,14 @@ def build_pair_records(
                 "question_type": "pairwise",
                 "question": PAIR_QUESTION,
                 "answer": NO_LABEL,
-                "same_instance": False,
+                "landmark": [left["landmark"], right["landmark"]],
                 "images": [make_image_entry(left), make_image_entry(right)],
             }
         )
-        label_counts[NO_LABEL] += 1
+        counts[NO_LABEL] += 1
         counter += 1
 
-    return records, label_counts
+    return records, counts
 
 
 def sample_multi_images(
@@ -160,18 +140,18 @@ def sample_multi_images(
     count_value: int,
     rng: random.Random,
 ) -> List[Dict]:
-    assert 0 <= count_value <= 3, "count_value should be between 0 and 3 inclusive."
-    all_ids = [inst for inst, entries in grouped.items() if entries]
-    if len(all_ids) < 1:
+    assert 0 <= count_value <= 3, "count_value must be between 0 and 3."
+    landmarks = [lm for lm, entries in grouped.items() if entries]
+    if not landmarks:
         raise RuntimeError("Dataset is empty.")
 
     max_attempts = 100
     for _ in range(max_attempts):
-        candidate_ids = [inst for inst, entries in grouped.items() if len(entries) >= (count_value + 1)]
-        if not candidate_ids:
-            raise RuntimeError(f"No instances with at least {count_value + 1} images available.")
-        ref_id = rng.choice(candidate_ids)
-        ref_entries = grouped[ref_id]
+        eligible = [lm for lm, entries in grouped.items() if len(entries) >= count_value + 1]
+        if not eligible:
+            raise RuntimeError(f"No landmarks with at least {count_value + 1} images.")
+        ref_landmark = rng.choice(eligible)
+        ref_entries = grouped[ref_landmark]
 
         ref_entry = rng.choice(ref_entries)
         positives_pool = [entry for entry in ref_entries if entry is not ref_entry]
@@ -182,11 +162,11 @@ def sample_multi_images(
         negatives_needed = 3 - count_value
         negatives: List[Dict] = []
         if negatives_needed > 0:
-            other_ids = [inst for inst in all_ids if inst != ref_id]
-            if len(other_ids) < negatives_needed:
+            others = [lm for lm in landmarks if lm != ref_landmark]
+            if len(others) < negatives_needed:
                 continue
-            negative_ids = rng.sample(other_ids, negatives_needed)
-            negatives = [rng.choice(grouped[inst]) for inst in negative_ids]
+            neg_landmarks = rng.sample(others, negatives_needed)
+            negatives = [rng.choice(grouped[lm]) for lm in neg_landmarks]
 
         reference = make_image_entry(ref_entry)
         test_entries = [make_image_entry(entry) for entry in positives]
@@ -194,7 +174,7 @@ def sample_multi_images(
         rng.shuffle(test_entries)
         return [reference] + test_entries
 
-    raise RuntimeError("Failed to sample multi-image example after multiple attempts.")
+    raise RuntimeError("Failed to sample multi-choice example after multiple attempts.")
 
 
 def build_multi_records(grouped: Dict[str, List[Dict]], rng: random.Random) -> Tuple[List[Dict], Dict[str, int]]:
@@ -213,6 +193,7 @@ def build_multi_records(grouped: Dict[str, List[Dict]], rng: random.Random) -> T
                     "question": MULTI_QUESTION,
                     "answer": str(count_value),
                     "target_count": count_value,
+                    "landmark": [img["landmark"] for img in images],
                     "images": images,
                 }
             )
@@ -222,15 +203,14 @@ def build_multi_records(grouped: Dict[str, List[Dict]], rng: random.Random) -> T
     return records, distribution
 
 
-def write_dataset(records: Sequence[Dict], output_dir: Path, overwrite: bool = False) -> None:
+def write_dataset(records: Sequence[Dict], output_dir: Path, overwrite: bool = False) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
     images_dir = output_dir / "images"
     if images_dir.exists() and overwrite:
         shutil.rmtree(images_dir)
     images_dir.mkdir(exist_ok=True)
-    json_path = output_dir / "ilias_pairmatch.jsonl"
-    stats_path = output_dir / "stats.json"
 
+    json_path = output_dir / "google_landmarks.jsonl"
     if json_path.exists() and not overwrite:
         raise FileExistsError(f"{json_path} already exists. Use --overwrite to replace it.")
 
@@ -251,57 +231,64 @@ def write_dataset(records: Sequence[Dict], output_dir: Path, overwrite: bool = F
                 "question": record["question"],
                 "answer": record["answer"],
                 "image_paths": image_paths,
-                "instance_ids": [image_entry["instance_id"] for image_entry in record["images"]],
-                "source_keys": [image_entry["source_key"] for image_entry in record["images"]],
+                "landmark": record.get("landmark"),
+                "instance_ids": [image_entry["image_id"] for image_entry in record["images"]],
+                "source_keys": image_paths,
             }
-            if record["question_type"] == "pairwise":
-                doc["same_instance"] = record["same_instance"]
-            else:
+            if record["question_type"] == "multiple_choice":
                 doc["target_count"] = record["target_count"]
 
             handle.write(json.dumps(doc) + "\n")
             progress.update(1)
 
+    return json_path
+
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Create the ilias_pairmatch dataset.")
+    parser = argparse.ArgumentParser(description="Create the google_landmarks dataset.")
     parser.add_argument(
         "--output-dir",
         type=Path,
-        default=Path("lmms_eval/tasks/ilias_pairmatch/data"),
+        default=Path("lmms_eval/tasks/google_landmarks/data"),
         help="Destination directory for images + jsonl.",
     )
-    parser.add_argument("--seed", type=int, default=13, help="RNG seed.")
+    parser.add_argument("--seed", type=int, default=23, help="RNG seed.")
     parser.add_argument("--overwrite", action="store_true", help="Replace existing outputs.")
+    parser.add_argument("--cache-dir", type=Path, default=Path("hf_cache_landmarks"), help="HF cache directory.")
     args = parser.parse_args()
 
     rng = random.Random(args.seed)
-    dataset = load_dataset("vrg-prague/ilias", "core_db", split="core_db", trust_remote_code=True)
-    grouped = index_by_instance(dataset.with_format("python"))
+    dataset = load_dataset(
+        "zguo0525/google-landmarks-v2-mini",
+        split="train",
+        trust_remote_code=True,
+        cache_dir=str(args.cache_dir),
+    )
+    label_names = dataset.features["label"].names
+    grouped = index_by_landmark(dataset.with_format("python"), label_names)
 
     positives = sample_same_pairs(grouped, PAIR_SAMPLES_PER_LABEL, rng)
     negatives = sample_diff_pairs(grouped, PAIR_SAMPLES_PER_LABEL, rng)
-    pair_records, label_counts = build_pair_records(positives, negatives)
+    pair_records, pair_counts = build_pair_records(positives, negatives)
 
     multi_records, multi_distribution = build_multi_records(grouped, rng)
 
     all_records = pair_records + multi_records
-    write_dataset(all_records, args.output_dir, overwrite=args.overwrite)
+    json_path = write_dataset(all_records, args.output_dir, overwrite=args.overwrite)
 
     stats = {
         "total": len(all_records),
         "pairwise_total": len(pair_records),
-        "pairwise_label_distribution": label_counts,
+        "pairwise_label_distribution": pair_counts,
         "multiple_choice_total": len(multi_records),
         "multiple_choice_distribution": multi_distribution,
     }
     stats_path = args.output_dir / "stats.json"
     with stats_path.open("w", encoding="utf-8") as handle:
         json.dump(stats, handle, indent=2)
-    print(f"Wrote {len(all_records)} samples -> {args.output_dir / 'ilias_pairmatch.jsonl'}")
-    print(f"Pairwise label distribution: {label_counts}")
+    print(f"Wrote {len(all_records)} samples -> {json_path}")
+    print(f"Pairwise label distribution: {pair_counts}")
     print(f"Multiple choice distribution: {multi_distribution}")
-
 
 if __name__ == "__main__":
     main()
