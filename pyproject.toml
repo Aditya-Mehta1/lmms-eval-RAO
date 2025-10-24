@@ -75,6 +75,9 @@ dependencies = [
     "sentence_transformers",
     "python-dotenv",
     "qwen-vl-utils>=0.0.14",
+    "rouge>=1.0.1",
+    "num2words>=0.5.14",
+    "xformers>=0.0.32.post2",
 ]
 
 [project.optional-dependencies]

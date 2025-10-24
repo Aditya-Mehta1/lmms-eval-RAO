@@ -334,14 +334,23 @@ class Qwen2_5_VL(lmms):
 
             generated_ids_trimmed = [out_ids[len(in_ids) :] for in_ids, out_ids in zip(inputs.input_ids, cont)]
             answers = self.processor.batch_decode(generated_ids_trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False)
+            debug_raw_answers = (
+                self.tokenizer.batch_decode(generated_ids_trimmed, skip_special_tokens=False, clean_up_tokenization_spaces=False)
+                if getattr(self, "debug_predictions", False)
+                else None
+            )
+            raw_answers = list(answers)
             for i, ans in enumerate(answers):
                 for term in until:
                     if len(term) > 0:
                         ans = ans.split(term)[0]
                 answers[i] = ans
 
-            for ans, context in zip(answers, contexts):
+            for idx, (raw_ans, ans, context) in enumerate(zip(raw_answers, answers, contexts)):
                 clean_ans = parse_reasoning_model_answer(ans)
+                if getattr(self, "debug_predictions", False):
+                    debug_raw_text = debug_raw_answers[idx] if debug_raw_answers is not None else raw_ans
+                    self._debug_last_raw_output = debug_raw_text.strip()
                 res.append(clean_ans)
                 self.cache_hook.add_partial("generate_until", (context, gen_kwargs), clean_ans)
                 pbar.update(1)
