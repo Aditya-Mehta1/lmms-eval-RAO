@@ -5,15 +5,20 @@ from loguru import logger as eval_logger
 from PIL import Image
 
 CHOICE_LABELS: List[str] = list("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
-LETTER_PATTERN = re.compile(r"^\s*[\(\[]?\s*([A-Za-z])\s*[\)\].:]?", re.IGNORECASE)
 
+# Prefer explicit labels anywhere (e.g., "(C)" or "[B]"), then "Answer: C", etc.
+_LABEL_PATTERNS = [
+    r"[\(\[]\s*([A-Za-z])\s*[\)\]]",  # (C) or [C]
+    r"(?i)\b(?:answer|ans|prediction|pred|output)\s*[:\-]?\s*[\(\[]?\s*([A-Za-z])\s*[\)\]]?",  # Answer: C / Ans (B)
+    r"^\s*([A-Za-z])\s*[\)\].:]",  # C)  C.  C:  C]
+    r"^\s*([A-Za-z])\s*$",  # just a single letter like "C"
+]
 
 def doc_to_visual(doc):
     image = doc["image"]
     if isinstance(image, Image.Image):
         return [image.convert("RGB")]
     return [Image.open(image).convert("RGB")]
-
 
 def doc_to_text(doc, lmms_eval_specific_kwargs=None):
     prompt = doc.get("prompt")
@@ -28,27 +33,50 @@ def _choice_map(choices: Iterable[str]) -> Dict[str, str]:
         mapping[label] = _normalize_text(choice)
     return mapping
 
-
 def _normalize_text(text: Optional[str]) -> str:
     if text is None:
         return ""
     return re.sub(r"\s+", " ", text).strip().lower()
 
-
 def _extract_label(text: Optional[str], valid_labels: Iterable[str]) -> Optional[str]:
+    """
+    Robustly extract a multiple-choice label from free-form model output.
+
+    Priority:
+      1) Parenthesized/bracketed label anywhere: "(C)" / "[B]"
+      2) Prefixes like "Answer: C", "Ans (D)", "Prediction - A"
+      3) Leading formats like "C)", "C.", "C:"
+      4) A single-letter line: "D"
+      5) Token-level isolated single letter elsewhere: ... C ...
+      6) Fallback: if the entire cleaned output equals a label
+    """
     if not isinstance(text, str):
         return None
-    match = LETTER_PATTERN.search(text)
-    if match:
-        candidate = match.group(1).upper()
-        if candidate in valid_labels:
-            return candidate
+    valid_labels = set(valid_labels)
+
+    # 1–4: targeted patterns
+    for pat in _LABEL_PATTERNS:
+        m = re.search(pat, text, flags=re.IGNORECASE)
+        if m:
+            cand = m.group(1).upper()
+            if cand in valid_labels:
+                return cand
+
+    # 5) token-level isolated single letter (avoid grabbing 'A' in 'Answer')
+    # Use word boundaries but ensure next/prev chars aren't letters.
+    m = re.search(r"(?<![A-Za-z])([A-Za-z])(?![A-Za-z])", text)
+    if m:
+        cand = m.group(1).upper()
+        if cand in valid_labels:
+            return cand
+
+    # 6) fallback: whole string equals a label
     text_clean = _normalize_text(text)
     upper_clean = text_clean.upper()
     if upper_clean in valid_labels:
         return upper_clean
-    return None
 
+    return None
 
 def _match_choice_by_text(text: Optional[str], mapping: Dict[str, str]) -> Optional[str]:
     if not isinstance(text, str):
@@ -61,14 +89,12 @@ def _match_choice_by_text(text: Optional[str], mapping: Dict[str, str]) -> Optio
             return label
     return None
 
-
 def _resolve_label(raw_value: Optional[str], mapping: Dict[str, str]) -> Optional[str]:
     valid_labels = mapping.keys()
     label = _extract_label(raw_value, valid_labels)
     if label is not None:
         return label
     return _match_choice_by_text(raw_value, mapping)
-
 
 def interleave_process_results(doc, results):
     choices = list(doc["choices"])
@@ -86,7 +112,6 @@ def interleave_process_results(doc, results):
             "pred": pred_label,
         }
     }
-
 
 def overall_score(results):
     buckets = {
